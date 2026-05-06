@@ -31,9 +31,13 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  let user = null
+  try {
+    const { data: { user: authUser } } = await supabase.auth.getUser()
+    user = authUser
+  } catch (error) {
+    console.error('[middleware] Auth check failed:', error)
+  }
 
   // Protected routes
   if (!user && request.nextUrl.pathname.startsWith('/dashboard')) {
