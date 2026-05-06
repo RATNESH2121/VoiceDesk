@@ -5,19 +5,10 @@ import type { Clinic } from '@/types'
 export async function getClinicByPhone(
     twilioNumber: string
 ): Promise<Clinic | null> {
-    // Normalize: Remove everything except digits
-    const digits = twilioNumber.replace(/\D/g, '')
-    
-    // We search using a LIKE match on the digits to be safe, 
-    // or you can just ensure your DB has the clean format.
-    // For now, let's log exactly what we received to help debugging.
-    console.log('[getClinic] Looking up clinic for digits:', digits)
-
     const { data, error } = await supabaseAdmin
         .from('clinics')
         .select('*')
-        // This search will match if the DB has '+13363967198' OR '3363967198'
-        .or(`twilio_number.eq.${twilioNumber},twilio_number.ilike.%${digits}`)
+        .eq('twilio_number', twilioNumber)
         .eq('active', true)
         .single()
 
