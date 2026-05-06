@@ -18,11 +18,17 @@ export function validateTwilioSignature(
     const authToken = process.env.TWILIO_AUTH_TOKEN!
     
     // Construct the full URL that Twilio called
-    // We use the current path to ensure validation works for all routes
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '')
-    const url = `${baseUrl}${path}`
+    // We use headers to get the actual host to avoid NEXT_PUBLIC_APP_URL mismatches
+    const protocol = req.headers.get('x-forwarded-proto') || 'https'
+    const host = req.headers.get('x-forwarded-host') || req.headers.get('host')
+    const url = `${protocol}://${host}${path}`
 
-    if (!twilioSignature) return false
+    console.log('[validateTwilio] Validating for URL:', url)
+
+    if (!twilioSignature) {
+        console.error('[validateTwilio] Missing x-twilio-signature header')
+        return false
+    }
 
     // Convert FormData to a plain object for Twilio validation
     const params: Record<string, string> = {}
@@ -32,5 +38,11 @@ export function validateTwilioSignature(
         }
     })
 
-    return twilio.validateRequest(authToken, twilioSignature, url, params)
+    const isValid = twilio.validateRequest(authToken, twilioSignature, url, params)
+    
+    if (!isValid) {
+        console.error('[validateTwilio] Invalid signature for URL:', url)
+    }
+
+    return isValid
 }
