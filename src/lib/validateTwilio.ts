@@ -18,6 +18,7 @@ export function validateTwilioSignature(
     const authToken = process.env.TWILIO_AUTH_TOKEN!
     
     // Construct the full URL that Twilio called
+    // We use the current path to ensure validation works for all routes
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '')
     const url = `${baseUrl}${path}`
 
