@@ -11,6 +11,7 @@ import {
 } from '@/lib/twiml'
 import { getClinicByPhone, isWithinWorkingHours } from '@/lib/getClinic'
 import { createCallLog } from '@/lib/logCall'
+import { initCallState } from '@/lib/callState'
 import { validateTwilioSignature } from '@/lib/validateTwilio'
 
 export async function POST(req: NextRequest) {
@@ -24,7 +25,7 @@ export async function POST(req: NextRequest) {
 
     const twilioCallSid = formData.get('CallSid') as string
     const callerPhone = formData.get('From') as string
-    const calledNumber = formData.get('To') as string   // your Twilio number
+    const calledNumber = formData.get('To') as string
 
     console.log('[incoming] call from:', callerPhone, 'to:', calledNumber, 'sid:', twilioCallSid)
 
@@ -40,15 +41,18 @@ export async function POST(req: NextRequest) {
         )
     }
 
-    // 2. Log the inbound call immediately (we update it later with transcript/outcome)
-    await createCallLog({
+    // 2. Log the inbound call immediately
+    const callLogId = await createCallLog({
         clinic_id: clinic.id,
         twilio_call_sid: twilioCallSid,
         caller_phone: callerPhone,
-        outcome: 'failed', // will be updated to real outcome later
+        outcome: 'failed',
     })
 
-    // 3. Check if clinic is within working hours
+    // 3. Initialize conversation state for this call
+    initCallState(twilioCallSid, clinic.id, callLogId || '', callerPhone)
+
+    // 4. Check if clinic is within working hours
     const isOpen = isWithinWorkingHours(clinic)
 
     if (!isOpen) {
@@ -65,18 +69,17 @@ export async function POST(req: NextRequest) {
         )
     }
 
-    // 4. Clinic is open — greet and record caller's request
+    // 5. Clinic is open — greet and record caller's request
     return twimlResponse(
         twimlSayAndRecord(
             clinic.brand_greeting +
-            ' Aap appointment lena chahte hain, ya koi aur jaankari chahiye? Boliye.',
+            ' Appointment ke liye, ya koi sawaal poochna hai? Boliye.',
             '/api/voice/recording-done'
         )
     )
 }
 
 // Twilio sends a POST — Next.js App Router needs this export
-// to prevent "Method Not Allowed" errors
 export async function GET() {
     return new Response('Voice webhook — POST only', { status: 405 })
 }
