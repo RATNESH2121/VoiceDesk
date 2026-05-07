@@ -14,49 +14,55 @@ interface TranscribeResult {
     language_detected: string
 }
 
+/**
+ * Downloads audio from Twilio and sends to OpenAI Whisper
+ */
 export async function transcribeAudio(
     recordingUrl: string,
     twilioAccountSid: string,
     twilioAuthToken: string
 ): Promise<TranscribeResult> {
+    console.log('[transcribe] Starting transcription for:', recordingUrl)
 
-    // 1. Download audio from Twilio
-    // Twilio recording URLs require Basic Auth
-    const audioBuffer = await downloadTwilioAudio(
-        recordingUrl,
-        twilioAccountSid,
-        twilioAuthToken
-    )
+    try {
+        // 1. Download audio from Twilio
+        const audioBuffer = await downloadTwilioAudio(
+            recordingUrl,
+            twilioAccountSid,
+            twilioAuthToken
+        )
 
-    // 2. Convert buffer to File object (OpenAI SDK helper)
-    // We specify a filename so the API knows the format
-    const audioFile = await toFile(audioBuffer, 'recording.wav', { type: 'audio/wav' })
+        // 2. Convert buffer to File object for OpenAI
+        const audioFile = await toFile(audioBuffer, 'recording.wav', { type: 'audio/wav' })
 
-    // 3. Send to Whisper
-    // language: 'hi' helps with Hindi/Hinglish accuracy
-    const response = await openai.audio.transcriptions.create({
-        file: audioFile,
-        model: 'whisper-1',
-        language: 'hi',
-        prompt: 'Yeh ek clinic ka phone call hai. Caller appointment lena chahta hai, ya fees, timing, ya address pooch raha hai. Caller Hindi aur English dono bol sakta hai.',
-        response_format: 'verbose_json',
-    })
+        // 3. Send to Whisper
+        console.log('[transcribe] Sending to OpenAI Whisper...')
+        const response = await openai.audio.transcriptions.create({
+            file: audioFile,
+            model: 'whisper-1',
+            language: 'hi', // Optimized for Hindi/Hinglish
+            prompt: 'Yeh ek clinic ka phone call hai. Caller appointment lena chahta hai, ya fees, timing, ya address pooch raha hai.',
+            response_format: 'verbose_json',
+        })
 
-    // verbose_json gives us language detection and duration
-    const verboseResponse = response as unknown as {
-        text: string
-        language: string
-        duration: number
-    }
+        const verboseResponse = response as any
+        
+        console.log('[transcribe] Successfully transcribed:', verboseResponse.text?.substring(0, 50) + '...')
 
-    return {
-        transcript: verboseResponse.text?.trim() || '',
-        duration_secs: Math.ceil(verboseResponse.duration || 0),
-        language_detected: verboseResponse.language || 'hi',
+        return {
+            transcript: verboseResponse.text?.trim() || '',
+            duration_secs: Math.ceil(verboseResponse.duration || 0),
+            language_detected: verboseResponse.language || 'hi',
+        }
+    } catch (error: any) {
+        console.error('[transcribe] Error during transcription process:', error?.message || error)
+        throw error
     }
 }
 
-// Download audio from Twilio with Basic Auth and retries
+/**
+ * Fetches the raw audio from Twilio with Basic Auth and retry logic
+ */
 async function downloadTwilioAudio(
     recordingUrl: string,
     accountSid: string,
@@ -64,23 +70,21 @@ async function downloadTwilioAudio(
     retries = 3
 ): Promise<Buffer> {
 
-    // Twilio recording URLs need .wav appended for raw audio
-    const url = recordingUrl.endsWith('.wav')
-        ? recordingUrl
-        : `${recordingUrl}.wav`
-
+    const url = recordingUrl.endsWith('.wav') ? recordingUrl : `${recordingUrl}.wav`
     const credentials = Buffer.from(`${accountSid}:${authToken}`).toString('base64')
 
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
+            console.log(`[transcribe] Download attempt ${attempt}/${retries} for ${url}`)
+            
             const response = await fetch(url, {
                 headers: { 'Authorization': `Basic ${credentials}` },
+                signal: AbortSignal.timeout(10000) // 10s timeout
             })
 
             if (response.status === 404 && attempt < retries) {
-                // Audio not ready yet — wait and retry
-                console.log(`[transcribe] audio not ready, retry ${attempt}/${retries}`)
-                await new Promise(resolve => setTimeout(resolve, attempt * 1000))
+                console.log('[transcribe] Audio not ready yet (404), waiting...')
+                await new Promise(resolve => setTimeout(resolve, attempt * 1500))
                 continue
             }
 
@@ -89,20 +93,22 @@ async function downloadTwilioAudio(
             }
 
             const arrayBuffer = await response.arrayBuffer()
-            return Buffer.from(arrayBuffer)
+            const buffer = Buffer.from(arrayBuffer)
+            
+            console.log(`[transcribe] Downloaded ${buffer.length} bytes`)
+            return buffer
 
-        } catch (err) {
+        } catch (err: any) {
+            console.warn(`[transcribe] Download attempt ${attempt} failed:`, err?.message || err)
             if (attempt === retries) throw err
-            await new Promise(resolve => setTimeout(resolve, attempt * 1000))
+            await new Promise(resolve => setTimeout(resolve, attempt * 1500))
         }
     }
 
     throw new Error('Failed to download audio after all retries')
 }
 
-// Utility: estimate Whisper cost for logging
 export function estimateWhisperCost(duration_secs: number): number {
-    // $0.006 per minute
     const minutes = duration_secs / 60
     return parseFloat((minutes * 0.006).toFixed(4))
 }
